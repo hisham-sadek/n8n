@@ -1,0 +1,455 @@
+{
+  "name": "Content Generation AI Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1,3,5"
+            }
+          ]
+        }
+      },
+      "id": "content-schedule",
+      "name": "Content Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "feedUrl": "https://feeds.feedburner.com/TechCrunch",
+        "options": {}
+      },
+      "id": "rss-monitor",
+      "name": "Industry News RSS",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1,
+      "position": [240, 480]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "content-request",
+        "options": {}
+      },
+      "id": "manual-trigger",
+      "name": "Manual Content Request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 660]
+    },
+    {
+      "parameters": {
+        "url": "https://trends.google.com/trends/api/explore",
+        "options": {
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "hl",
+                "value": "en-US"
+              },
+              {
+                "name": "tz",
+                "value": "360"
+              },
+              {
+                "name": "req",
+                "value": "{\"comparisonItem\":[{\"keyword\":\"{{ $json.keyword }}\",\"geo\":\"\",\"time\":\"today 12-m\"}],\"category\":0,\"property\":\"\"}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "trend-analysis",
+      "name": "Google Trends Analysis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [460, 200]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4",
+        "options": {
+          "systemMessage": "You are a content strategist. Analyze trending topics and news to generate content ideas that align with our brand. Create detailed content outlines with SEO keywords, target audience, and key messaging."
+        }
+      },
+      "id": "content-strategist",
+      "name": "AI Content Strategist",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1,
+      "position": [460, 390]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "operation": "equal"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.content_type }}",
+              "rightValue": "blog_post",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "content-type-router",
+      "name": "Content Type Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [680, 390]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4",
+        "options": {
+          "systemMessage": "You are a professional blog writer. Create engaging, SEO-optimized blog posts based on the provided outline. Include proper headings, meta descriptions, and call-to-actions. Maintain our brand voice and style."
+        }
+      },
+      "id": "blog-writer",
+      "name": "AI Blog Writer",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4",
+        "options": {
+          "systemMessage": "You are a social media manager. Create platform-specific social media posts based on the content outline. Optimize for engagement and include relevant hashtags."
+        }
+      },
+      "id": "social-media-writer",
+      "name": "AI Social Media Writer",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1,
+      "position": [900, 380]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4",
+        "options": {
+          "systemMessage": "You are an email marketing specialist. Create compelling email newsletter content with personalized subject lines and clear call-to-actions."
+        }
+      },
+      "id": "email-writer",
+      "name": "AI Email Writer",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1,
+      "position": [900, 560]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4",
+        "options": {
+          "systemMessage": "You are a content quality reviewer. Check the content for grammar, brand compliance, factual accuracy, and SEO optimization. Provide improvement suggestions."
+        }
+      },
+      "id": "content-reviewer",
+      "name": "AI Content Reviewer",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1,
+      "position": [1120, 390]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "operation": "largerEqual"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.quality_score }}",
+              "rightValue": 8,
+              "operator": {
+                "type": "number",
+                "operation": "largerEqual"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "quality-gate",
+      "name": "Quality Gate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1340, 390]
+    },
+    {
+      "parameters": {
+        "resource": "post",
+        "operation": "create",
+        "title": "={{ $json.title }}",
+        "content": "={{ $json.content }}",
+        "status": "draft",
+        "additionalFields": {
+          "excerpt": "={{ $json.meta_description }}",
+          "tags": "={{ $json.tags.join(', ') }}",
+          "featured_media": "={{ $json.featured_image_id }}"
+        }
+      },
+      "id": "wordpress-publish",
+      "name": "Publish to WordPress",
+      "type": "n8n-nodes-base.wordpress",
+      "typeVersion": 1,
+      "position": [1560, 200]
+    },
+    {
+      "parameters": {
+        "resource": "tweet",
+        "operation": "create",
+        "text": "={{ $json.twitter_content }}",
+        "additionalFields": {}
+      },
+      "id": "twitter-publish",
+      "name": "Publish to Twitter",
+      "type": "n8n-nodes-base.twitter",
+      "typeVersion": 2,
+      "position": [1560, 380]
+    },
+    {
+      "parameters": {
+        "resource": "post",
+        "operation": "create",
+        "text": "={{ $json.linkedin_content }}",
+        "additionalFields": {}
+      },
+      "id": "linkedin-publish",
+      "name": "Publish to LinkedIn",
+      "type": "n8n-nodes-base.linkedIn",
+      "typeVersion": 1,
+      "position": [1560, 560]
+    },
+    {
+      "parameters": {
+        "channel": "#content-team",
+        "text": "📝 New content published!\n\nType: {{ $json.content_type }}\nTitle: {{ $json.title }}\nQuality Score: {{ $json.quality_score }}/10\nPlatforms: {{ $json.published_platforms.join(', ') }}",
+        "otherOptions": {}
+      },
+      "id": "content-notification",
+      "name": "Content Team Notification",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [1560, 740]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO content_analytics (content_id, title, type, publish_date, platforms, quality_score, seo_keywords) VALUES ('{{ $json.content_id }}', '{{ $json.title }}', '{{ $json.content_type }}', NOW(), '{{ $json.published_platforms.join(', ') }}', {{ $json.quality_score }}, '{{ $json.seo_keywords.join(', ') }}')",
+        "options": {}
+      },
+      "id": "analytics-tracking",
+      "name": "Track Content Analytics",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1780, 390]
+    }
+  ],
+  "connections": {
+    "Content Schedule": {
+      "main": [
+        [
+          {
+            "node": "Google Trends Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Industry News RSS": {
+      "main": [
+        [
+          {
+            "node": "AI Content Strategist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Content Request": {
+      "main": [
+        [
+          {
+            "node": "AI Content Strategist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Trends Analysis": {
+      "main": [
+        [
+          {
+            "node": "AI Content Strategist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Content Strategist": {
+      "main": [
+        [
+          {
+            "node": "Content Type Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Content Type Router": {
+      "main": [
+        [
+          {
+            "node": "AI Blog Writer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI Social Media Writer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI Email Writer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Blog Writer": {
+      "main": [
+        [
+          {
+            "node": "AI Content Reviewer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Social Media Writer": {
+      "main": [
+        [
+          {
+            "node": "AI Content Reviewer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Email Writer": {
+      "main": [
+        [
+          {
+            "node": "AI Content Reviewer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Content Reviewer": {
+      "main": [
+        [
+          {
+            "node": "Quality Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Quality Gate": {
+      "main": [
+        [
+          {
+            "node": "Publish to WordPress",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Publish to Twitter",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Publish to LinkedIn",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Content Team Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publish to WordPress": {
+      "main": [
+        [
+          {
+            "node": "Track Content Analytics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publish to Twitter": {
+      "main": [
+        [
+          {
+            "node": "Track Content Analytics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publish to LinkedIn": {
+      "main": [
+        [
+          {
+            "node": "Track Content Analytics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["ai", "content-generation", "social-media", "automation"],
+  "triggerCount": 3,
+  "updatedAt": "2025-07-12T13:00:00.000Z",
+  "versionId": "1"
+}
+

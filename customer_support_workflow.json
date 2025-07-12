@@ -1,0 +1,243 @@
+{
+  "name": "Customer Support AI Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "email-trigger",
+      "name": "Email Trigger",
+      "type": "n8n-nodes-base.emailReadImap",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "support-webhook",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Chat Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 480]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4",
+        "options": {
+          "systemMessage": "You are a helpful customer support agent. Analyze the incoming message and classify it by urgency (Low, Medium, High, Critical), department (Technical, Billing, General), and sentiment (Positive, Neutral, Negative). Respond in JSON format."
+        }
+      },
+      "id": "message-classifier",
+      "name": "Message Classifier",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1,
+      "position": [460, 390]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "operation": "contains"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.urgency }}",
+              "rightValue": "Critical",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "urgency-router",
+      "name": "Urgency Router",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 390]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4",
+        "options": {
+          "systemMessage": "You are a customer support agent. Provide helpful, empathetic responses based on the company knowledge base. Keep responses concise and actionable."
+        },
+        "tools": [
+          {
+            "name": "knowledge_search",
+            "description": "Search the company knowledge base for relevant information"
+          },
+          {
+            "name": "create_ticket",
+            "description": "Create a support ticket for complex issues"
+          }
+        ]
+      },
+      "id": "ai-agent",
+      "name": "AI Support Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "vectorStore": "pinecone",
+        "pineconeIndex": "support-kb",
+        "topK": 5
+      },
+      "id": "knowledge-search",
+      "name": "Knowledge Base Search",
+      "type": "@n8n/n8n-nodes-langchain.vectorStorePinecone",
+      "typeVersion": 1,
+      "position": [900, 480]
+    },
+    {
+      "parameters": {
+        "subject": "Re: {{ $json.subject }}",
+        "message": "{{ $json.response }}",
+        "options": {}
+      },
+      "id": "email-response",
+      "name": "Send Email Response",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "resource": "ticket",
+        "operation": "create",
+        "subject": "{{ $json.subject }}",
+        "description": "{{ $json.message }}",
+        "priority": "{{ $json.urgency.toLowerCase() }}",
+        "type": "{{ $json.department.toLowerCase() }}"
+      },
+      "id": "create-ticket",
+      "name": "Create Support Ticket",
+      "type": "n8n-nodes-base.zendesk",
+      "typeVersion": 1,
+      "position": [900, 600]
+    },
+    {
+      "parameters": {
+        "channel": "#support-alerts",
+        "text": "🚨 Critical support issue detected!\n\nSubject: {{ $json.subject }}\nSentiment: {{ $json.sentiment }}\nTicket: {{ $json.ticket_id }}",
+        "otherOptions": {}
+      },
+      "id": "slack-alert",
+      "name": "Slack Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [1120, 480]
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "{\n  \"conversation_id\": \"{{ $json.id }}\",\n  \"customer_email\": \"{{ $json.from }}\",\n  \"message\": \"{{ $json.message }}\",\n  \"response\": \"{{ $json.response }}\",\n  \"classification\": {\n    \"urgency\": \"{{ $json.urgency }}\",\n    \"department\": \"{{ $json.department }}\",\n    \"sentiment\": \"{{ $json.sentiment }}\"\n  },\n  \"timestamp\": \"{{ $now }}\"\n}",
+        "options": {}
+      },
+      "id": "memory-store",
+      "name": "Store Conversation",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [1120, 600]
+    }
+  ],
+  "connections": {
+    "Email Trigger": {
+      "main": [
+        [
+          {
+            "node": "Message Classifier",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chat Webhook": {
+      "main": [
+        [
+          {
+            "node": "Message Classifier",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message Classifier": {
+      "main": [
+        [
+          {
+            "node": "Urgency Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Urgency Router": {
+      "main": [
+        [
+          {
+            "node": "Slack Alert",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Create Support Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI Support Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Support Agent": {
+      "main": [
+        [
+          {
+            "node": "Send Email Response",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Store Conversation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["ai", "customer-support", "automation"],
+  "triggerCount": 2,
+  "updatedAt": "2025-07-12T13:00:00.000Z",
+  "versionId": "1"
+}
+

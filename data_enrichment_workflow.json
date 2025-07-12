@@ -1,0 +1,317 @@
+{
+  "name": "Data Enrichment AI Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "new-lead",
+        "options": {}
+      },
+      "id": "crm-webhook",
+      "name": "CRM New Lead",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1"
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Weekly Enrichment",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 480]
+    },
+    {
+      "parameters": {
+        "url": "https://api.clearbit.com/v2/companies/find",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "clearbitApi",
+        "options": {
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "domain",
+                "value": "={{ $json.company_domain }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "clearbit-enrichment",
+      "name": "Clearbit Company Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [460, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://api.linkedin.com/v2/people",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "linkedInApi",
+        "options": {
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "q",
+                "value": "={{ $json.contact_name }}"
+              },
+              {
+                "name": "company",
+                "value": "={{ $json.company_name }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "linkedin-enrichment",
+      "name": "LinkedIn Profile Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [460, 380]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.company_website }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": false,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "website-scraper",
+      "name": "Scrape Company Website",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [460, 560]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4",
+        "options": {
+          "systemMessage": "You are a data analyst. Analyze the provided company and contact information to extract key insights, calculate lead scores, and identify business opportunities. Return structured JSON data."
+        }
+      },
+      "id": "ai-data-analyst",
+      "name": "AI Data Analyst",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1,
+      "position": [680, 390]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "operation": "largerEqual"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.lead_score }}",
+              "rightValue": 80,
+              "operator": {
+                "type": "number",
+                "operation": "largerEqual"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "lead-score-filter",
+      "name": "High-Value Lead Filter",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 390]
+    },
+    {
+      "parameters": {
+        "resource": "contact",
+        "operation": "update",
+        "contactId": "={{ $json.contact_id }}",
+        "updateFields": {
+          "company_size": "={{ $json.enriched_data.company_size }}",
+          "industry": "={{ $json.enriched_data.industry }}",
+          "revenue": "={{ $json.enriched_data.revenue }}",
+          "lead_score": "={{ $json.lead_score }}",
+          "technologies": "={{ $json.enriched_data.technologies.join(', ') }}",
+          "social_profiles": "={{ $json.enriched_data.social_profiles }}"
+        }
+      },
+      "id": "update-crm",
+      "name": "Update CRM Record",
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "channel": "#sales-alerts",
+        "text": "🎯 High-value lead detected!\n\nCompany: {{ $json.company_name }}\nLead Score: {{ $json.lead_score }}\nRevenue: {{ $json.enriched_data.revenue }}\nContact: {{ $json.contact_name }}",
+        "otherOptions": {}
+      },
+      "id": "sales-alert",
+      "name": "Sales Team Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [1120, 480]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO lead_enrichment_log (contact_id, enrichment_date, data_sources, lead_score, status) VALUES ('{{ $json.contact_id }}', NOW(), '{{ $json.data_sources.join(', ') }}', {{ $json.lead_score }}, 'completed')",
+        "options": {}
+      },
+      "id": "log-enrichment",
+      "name": "Log Enrichment Activity",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.4,
+      "position": [1120, 600]
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "{\n  \"contact_id\": \"{{ $json.contact_id }}\",\n  \"enriched_data\": {\n    \"company_size\": \"{{ $json.clearbit_data.metrics.employees }}\",\n    \"industry\": \"{{ $json.clearbit_data.category.industry }}\",\n    \"revenue\": \"{{ $json.clearbit_data.metrics.annualRevenue }}\",\n    \"technologies\": {{ $json.clearbit_data.tech | json }},\n    \"social_profiles\": {\n      \"linkedin\": \"{{ $json.linkedin_data.publicProfileUrl }}\",\n      \"twitter\": \"{{ $json.clearbit_data.twitter.handle }}\"\n    },\n    \"website_insights\": \"{{ $json.website_analysis }}\"\n  },\n  \"lead_score\": {{ $json.calculated_score }},\n  \"data_sources\": [\"clearbit\", \"linkedin\", \"website\"],\n  \"enrichment_timestamp\": \"{{ $now }}\"\n}",
+        "options": {}
+      },
+      "id": "data-merger",
+      "name": "Merge Enriched Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [680, 200]
+    }
+  ],
+  "connections": {
+    "CRM New Lead": {
+      "main": [
+        [
+          {
+            "node": "Clearbit Company Data",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "LinkedIn Profile Data",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Scrape Company Website",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weekly Enrichment": {
+      "main": [
+        [
+          {
+            "node": "Clearbit Company Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clearbit Company Data": {
+      "main": [
+        [
+          {
+            "node": "Merge Enriched Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LinkedIn Profile Data": {
+      "main": [
+        [
+          {
+            "node": "Merge Enriched Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scrape Company Website": {
+      "main": [
+        [
+          {
+            "node": "Merge Enriched Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Enriched Data": {
+      "main": [
+        [
+          {
+            "node": "AI Data Analyst",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Data Analyst": {
+      "main": [
+        [
+          {
+            "node": "High-Value Lead Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "High-Value Lead Filter": {
+      "main": [
+        [
+          {
+            "node": "Sales Team Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update CRM Record",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log Enrichment Activity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["ai", "data-enrichment", "crm", "automation"],
+  "triggerCount": 2,
+  "updatedAt": "2025-07-12T13:00:00.000Z",
+  "versionId": "1"
+}
+
